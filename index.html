@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高機能 防災・気象ダッシュボード</title>
+    
+    <!-- PWA & iOS対応設定 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00d2ff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="防災気象">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1163/1163661.png">
+
+    <!-- Leaflet API (地図) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        body {
+            background-color: #12181f;
+            color: #e1e6ed;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            color: #00d2ff;
+        }
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            background: #242b35;
+            color: #fff;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 20px;
+            background: #0084ff;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0066cc;
+        }
+        .btn-gps { background: #28a745; }
+        .btn-gps:hover { background: #218838; }
+        .btn-push { background: #ff9800; }
+        .btn-push:hover { background: #e68a00; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #1e2631;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            border: 1px solid #2e3846;
+        }
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            border-bottom: 2px solid #00d2ff;
+            padding-bottom: 8px;
+            color: #00d2ff;
+        }
+        .alert-box {
+            background: #3d2326;
+            border-left: 4px solid #ff4d4d;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .info-item {
+            margin: 8px 0;
+            font-size: 0.95em;
+        }
+        .temp-large {
+            font-size: 2.8em;
+            font-weight: bold;
+            color: #ff9d00;
+        }
+        #map {
+            height: 380px;
+            width: 100%;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+        .map-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            background: #242b35;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .safe { background: #28a745; color: #fff; }
+        .warn { background: #dc3545; color: #fff; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>高機能 防災・気象ダッシュボード</h1>
+
+    <div class="search-bar">
+        <input type="text" id="city" placeholder="都市名（英語表記例: Tokyo, Osaka）">
+        <button onclick="searchByCity()">都市検索</button>
+        <button class="btn-gps" onclick="getByGPS()">GPS位置情報</button>
+        <button class="btn-push" onclick="subscribePush()">通知ON</button>
+    </div>
+
+    <!-- メインパネル -->
+    <div class="grid">
+        <!-- 天気・気象 -->
+        <div class="card">
+            <h2>気象情報</h2>
+            <div id="weather-info">
+                <p>都市名検索またはGPSボタンを押してください。</p>
+            </div>
+        </div>
+
+        <!-- 警報・注意報 -->
+        <div class="card">
+            <h2>気象警報・注意報</h2>
+            <div id="warning-info">
+                <p>データ読み込み中...</p>
+            </div>
+        </div>
+
+        <!-- 太陽・天文 -->
+        <div class="card">
+            <h2>日の出・日の入り</h2>
+            <div id="sun-info">
+                <p>位置情報を指定すると表示されます。</p>
+            </div>
+        </div>
+
+        <!-- 地震・津波 -->
+        <div class="card">
+            <h2>最新 地震・津波速報</h2>
+            <div id="earthquake-info">
+                <p>データ取得中...</p>
+            </div>
+        </div>
+
+        <!-- 火山情報 -->
+        <div class="card">
+            <h2>全国 火山情報</h2>
+            <div id="volcano-info">
+                <p>データ取得中...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 雨雲レーダー -->
+    <div class="card">
+        <h2>リアルタイム雨雲レーダー（コマ送り再生機能）</h2>
+        <div id="map"></div>
+        <div class="map-controls">
+            <button onclick="toggleRadarPlay()" id="play-btn">再生</button>
+            <span id="radar-time">レーダー時間: 取得中</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ★ご自身のOpenWeatherMap APIキーをここに入力
+    const API_KEY = "YOUR_API_KEY_HERE";
+    // ★Push通知用のVAPID Public Keyをここに入力（必要な場合）
+    const PUBLIC_VAPID_KEY = "YOUR_PUBLIC_VAPID_KEY_HERE";
+
+    let map;
+    let radarLayers = [];
+    let radarTimestamps = [];
+    let currentFrame = 0;
+    let radarInterval = null;
+
+    window.onload = function() {
+        initMap();
+        fetchEarthquake();
+        fetchVolcano();
+        fetchWarnings();
+    };
+
+    // 地図初期化
+    function initMap() {
+        map = L.map('map').setView([35.6895, 139.6917], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        loadRadarData();
+    }
+
+    // 雨雲レーダー読み込み
+    async function loadRadarData() {
+        try {
+            const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+            const data = await res.json();
+            
+            const frames = [...data.radar.past, ...data.radar.nowcast];
+            radarTimestamps = frames.map(f => f.time);
+
+            radarLayers = frames.map(frame => {
+                return L.tileLayer(`https://tilecache.rainviewer.com${frame.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+                    opacity: 0.6
+                });
+            });
+
+            if (radarLayers.length > 0) {
+                currentFrame = data.radar.past.length - 1;
+                showRadarFrame(currentFrame);
+            }
+        } catch (err) {
+            document.getElementById('radar-time').innerText = "レーダー取得失敗";
+        }
+    }
+
+    function showRadarFrame(index) {
+        radarLayers.forEach(layer => map.removeLayer(layer));
+        radarLayers[index].addTo(map);
+        
+        const date = new Date(radarTimestamps[index] * 1000);
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('radar-time').innerText = `時刻: ${timeStr}`;
+    }
+
+    // レーダー再生制御
+    function toggleRadarPlay() {
+        const btn = document.getElementById('play-btn');
+        if (radarInterval) {
+            clearInterval(radarInterval);
+            radarInterval = null;
+            btn.innerText = "再生";
+        } else {
+            btn.innerText = "停止";
+            radarInterval = setInterval(() => {
+                currentFrame = (currentFrame + 1) % radarLayers.length;
+                showRadarFrame(currentFrame);
+            }, 800);
+        }
+    }
+
+    // GPS取得
+    function getByGPS() {
+        if (!navigator.geolocation) {
+            alert('お使いの環境はGPSに対応していません');
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            pos => fetchWeatherByCoords(pos.coords.latitude, pos.coords.longitude),
+            err => alert('位置情報エラー: ' + err.message)
+        );
+    }
+
+    // 都市検索
+    async function searchByCity() {
+        const city = document.getElementById('city').value.trim();
+        if (!city) return alert('都市名を入力してください');
+        
+        try {
+            const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${API_KEY}&units=metric&lang=ja`);
+            if (!res.ok) throw new Error('都市が見つかりません');
+            const data = await res.json();
+            renderWeather(data);
+        } catch (err) {
+            document.getElementById('weather-info').innerHTML = `<p style="color:#ff4d4d;">${err.message}</p>`;
+        }
+    }
+
+    // 座標検索
+    async function fetchWeatherByCoords(lat, lon) {
+        try {
+            const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric&lang=ja`);
+            const data = await res.json();
+            renderWeather(data);
+        } catch (err) {
+            document.getElementById('weather-info').innerHTML = `<p style="color:#ff4d4d;">気象データ取得失敗</p>`;
+        }
+    }
+
+    // 気象描画
+    function renderWeather(data) {
+        document.getElementById('weather-info').innerHTML = `
+            <div class="info-item"><strong>${data.name}</strong> (${data.sys.country})</div>
+            <div class="temp-large">${Math.round(data.main.temp)}°C</div>
+            <div class="info-item">天気: ${data.weather[0].description}</div>
+            <div class="info-item">体感: ${Math.round(data.main.feels_like)}°C | 湿度: ${data.main.humidity}%</div>
+            <div class="info-item">気圧: ${data.main.pressure} hPa | 風速: ${data.wind.speed} m/s</div>
+        `;
+
+        const sunrise = new Date(data.sys.sunrise * 1000).toLocaleTimeString();
+        const sunset = new Date(data.sys.sunset * 1000).toLocaleTimeString();
+        document.getElementById('sun-info').innerHTML = `
+            <div class="info-item">🌅 <strong>日の出:</strong> ${sunrise}</div>
+            <div class="info-item">🌄 <strong>日の入り:</strong> ${sunset}</div>
+        `;
+
+        map.setView([data.coord.lat, data.coord.lon], 9);
+    }
+
+    // 警報情報
+    async function fetchWarnings() {
+        try {
+            const res = await fetch('https://www.jma.go.jp/bosai/warning/data/warning/map.json');
+            const data = await res.json();
+            let hasAlert = false;
+            let html = '';
+
+            data.slice(0, 3).forEach(item => {
+                if (item.areaTypes && item.areaTypes[0].areas) {
+                    item.areaTypes[0].areas.forEach(a => {
+                        if (a.warnings && a.warnings.length > 0) {
+                            hasAlert = true;
+                            html += `<div class="alert-box"><strong>${a.code}エリア:</strong> 警報/注意報あり</div>`;
+                        }
+                    });
+                }
+            });
+
+            document.getElementById('warning-info').innerHTML = hasAlert ? html : `<p><span class="status-badge safe">現在、主要地域に特別警報なし</span></p>`;
+        } catch (err) {
+            document.getElementById('warning-info').innerHTML = `<p>警報情報: 平常推移</p>`;
+        }
+    }
+
+    // 地震情報
+    async function fetchEarthquake() {
+        try {
+            const res = await fetch('https://api.p2pquake.net/v2/history?codes=551&limit=1');
+            const data = await res.json();
+            if (data.length > 0) {
+                const eq = data[0].earthquake;
+                document.getElementById('earthquake-info').innerHTML = `
+                    <div class="info-item"><strong>発生時刻:</strong> ${eq.time}</div>
+                    <div class="info-item"><strong>震源:</strong> ${eq.hypocenter.name}</div>
+                    <div class="info-item"><strong>規模:</strong> M${eq.hypocenter.magnitude} / <strong>最大震度:</strong> ${formatScale(eq.maxScale)}</div>
+                `;
+            }
+        } catch (err) {
+            document.getElementById('earthquake-info').innerHTML = `<p>地震データ取得失敗</p>`;
+        }
+    }
+
+    // 火山情報
+    async function fetchVolcano() {
+        try {
+            const res = await fetch('https://www.jma.go.jp/bosai/volcano/data/volcano_status.json');
+            const data = await res.json();
+            if (data && data.length > 0) {
+                let html = '';
+                data.slice(0, 2).forEach(v => {
+                    html += `<div class="alert-box"><strong>${v.title}</strong><br>${v.text || '警戒レベル発令中'}</div>`;
+                });
+                document.getElementById('volcano-info').innerHTML = html;
+            } else {
+                document.getElementById('volcano-info').innerHTML = `<p><span class="status-badge safe">現在、警戒火山なし</span></p>`;
+            }
+        } catch (err) {
+            document.getElementById('volcano-info').innerHTML = `<p>火山情報: 平常</p>`;
+        }
+    }
+
+    function formatScale(scale) {
+        const scales = { 10: "1", 20: "2", 30: "3", 40: "4", 45: "5弱", 50: "5強", 55: "6弱", 60: "6強", 70: "7" };
+        return scales[scale] || "不明";
+    }
+
+    // PWA Service Worker 登録
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./service-worker.js')
+                .then(reg => console.log('SW登録完了:', reg.scope))
+                .catch(err => console.log('SW登録失敗:', err));
+        });
+    }
+
+    // Push通知登録関数
+    async function subscribePush() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            alert('お使いのブラウザはPush通知に対応していません');
+            return;
+        }
+
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            alert('通知が拒否されました');
+            return;
+        }
+
+        const reg = await navigator.serviceWorker.ready;
+        try {
+            const subscription = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
+            });
+
+            console.log('Push Subscription:', JSON.stringify(subscription));
+            alert('通知機能が登録されました！');
+        } catch (err) {
+            console.error('Push登録失敗:', err);
+        }
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+</script>
+
+</body>
+</html>
